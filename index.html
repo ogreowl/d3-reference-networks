@@ -49,6 +49,11 @@
 <body>
     <div class="container">
         <h1>My D3 Visualization</h1>
+        <div class="philosopher-selection" style="margin: 20px 0;">
+            <h4>Select Philosophers:</h4>
+            <div id="philosopher-checkboxes" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;">
+            </div>
+        </div>
         <div style="margin: 20px 0;">
             <label for="threshold">Reference Threshold: </label>
             <input type="range" id="threshold" min="0" max="15" value="0" step="1">
