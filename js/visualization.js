@@ -256,14 +256,173 @@ philosophers.forEach((phil, i) => {
  const slider = document.getElementById('threshold');
  const thresholdDisplay = document.getElementById('threshold-value');
  
+ // Track selected philosophers
+ const selectedPhilosophers = new Set(philosophers.map(p => p.name));
+ 
+ // Create checkboxes
+ const checkboxContainer = document.getElementById('philosopher-checkboxes');
+ philosophers.forEach(phil => {
+    const label = document.createElement('label');
+    label.style.display = 'inline-block';
+    
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = true;
+    checkbox.value = phil.name;
+    
+    checkbox.addEventListener('change', function() {
+        if (this.checked) {
+            selectedPhilosophers.add(this.value);
+        } else {
+            selectedPhilosophers.delete(this.value);
+        }
+        // Force update of reference lines by updating threshold
+        const threshold = parseInt(slider.value);
+        thresholdDisplay.textContent = threshold;
+        updateVisualization();
+    });
+    
+    label.appendChild(checkbox);
+    label.appendChild(document.createTextNode(` ${phil.name}`));
+    checkboxContainer.appendChild(label);
+ });
+ 
+ // Add this function to update the visualization
+ function updateVisualization() {
+    // Calculate reference counts first
+    const visibleOutgoingRefs = philosophers.map(phil => {
+        if (!selectedPhilosophers.has(phil.name)) return 0;
+        
+        return philosophers.reduce((total, target) => {
+            if (!selectedPhilosophers.has(target.name)) return total;
+            const sourceIndex = philosophers.findIndex(p => p.name === phil.name);
+            const targetIndex = philosophers.findIndex(p => p.name === target.name);
+            return total + referenceMatrix[sourceIndex][targetIndex];
+        }, 0);
+    });
+
+    const visibleIncomingRefs = philosophers.map(phil => {
+        if (!selectedPhilosophers.has(phil.name)) return 0;
+        
+        return philosophers.reduce((total, source) => {
+            if (!selectedPhilosophers.has(source.name)) return total;
+            const sourceIndex = philosophers.findIndex(p => p.name === source.name);
+            const targetIndex = philosophers.findIndex(p => p.name === phil.name);
+            return total + referenceMatrix[sourceIndex][targetIndex];
+        }, 0);
+    });
+
+    const selectedPhilosopherData = philosophers.filter(p => selectedPhilosophers.has(p.name));
+    
+    // Update scales using the pre-calculated values
+    xScale.domain([
+        d3.min(selectedPhilosopherData, d => d.birthYear),
+        d3.max(selectedPhilosopherData, d => d.birthYear)
+    ]).nice();
+    
+    yScale.domain([0,
+        d3.max(visibleOutgoingRefs)
+    ]).nice();
+
+    // Update all visual elements using the pre-calculated values
+    // ... rest of the function remains the same, using visibleOutgoingRefs and visibleIncomingRefs ...
+
+    // Update axes
+    yAxis.transition()
+        .duration(750)
+        .call(d3.axisLeft(yScale));
+    
+    xAxis.transition()
+        .duration(750)
+        .attr('transform', `translate(0,${innerHeight})`)
+        .call(d3.axisBottom(xScale));
+
+    // Update points with new y positions
+    g.selectAll('.author-point')
+        .transition()
+        .duration(750)
+        .attr('cx', d => xScale(d.birthYear))
+        .attr('cy', (d, i) => yScale(visibleOutgoingRefs[i]))
+        .style('display', d => selectedPhilosophers.has(d.name) ? 'block' : 'none');
+
+    // Update bubbles with new sizes and positions
+    g.selectAll('.author-bubble')
+        .transition()
+        .duration(750)
+        .attr('cx', d => xScale(d.birthYear))
+        .attr('cy', (d, i) => yScale(visibleOutgoingRefs[i]))
+        .attr('r', (d, i) => Math.sqrt(visibleIncomingRefs[i]) * 2)
+        .style('display', d => selectedPhilosophers.has(d.name) ? 'block' : 'none');
+
+    // Update labels
+    g.selectAll('.author-label')
+        .transition()
+        .duration(750)
+        .attr('x', d => xScale(d.birthYear))
+        .attr('y', (d, i) => yScale(visibleOutgoingRefs[i]) - 10)
+        .style('display', d => selectedPhilosophers.has(d.name) ? 'block' : 'none');
+
+    // Update reference lines with new positions
+    g.selectAll('.reference-line')
+        .transition()
+        .duration(750)
+        .attr('d', function() {
+            const title = this.querySelector('title').textContent;
+            const [source, ...rest] = title.split(' references ');
+            const target = rest.join(' references ').split(' ')[0];
+            const refs = parseInt(this.getAttribute('data-refs'));
+            const threshold = parseInt(slider.value);
+            
+            // Only create path if both philosophers are selected and above threshold
+            if (!selectedPhilosophers.has(source) || 
+                !selectedPhilosophers.has(target) || 
+                refs < threshold) {
+                return null;  // This will effectively hide the path
+            }
+            
+            const sourceIndex = philosophers.findIndex(p => p.name === source);
+            const targetIndex = philosophers.findIndex(p => p.name === target);
+            
+            const sourceX = xScale(philosophers[sourceIndex].birthYear);
+            const sourceY = yScale(visibleOutgoingRefs[sourceIndex]);
+            const targetX = xScale(philosophers[targetIndex].birthYear);
+            const targetY = yScale(visibleOutgoingRefs[targetIndex]);
+            
+            // Handle bidirectional references
+            const reverseRefs = referenceMatrix[targetIndex][sourceIndex];
+            
+            if (reverseRefs > 0 && source > target) {
+                // Adjust curve for bidirectional references
+                const midY = (sourceY + targetY) / 2 + 50;
+                const path = d3.path();
+                path.moveTo(sourceX, sourceY);
+                path.quadraticCurveTo((sourceX + targetX) / 2, midY, targetX, targetY);
+                return path.toString();
+            } else {
+                // Standard curve
+                const midY = (sourceY + targetY) / 2 - 50;
+                const path = d3.path();
+                path.moveTo(sourceX, sourceY);
+                path.quadraticCurveTo((sourceX + targetX) / 2, midY, targetX, targetY);
+                return path.toString();
+            }
+        })
+        .style('display', function() {
+            const title = this.querySelector('title').textContent;
+            const [source, ...rest] = title.split(' references ');
+            const target = rest.join(' references ').split(' ')[0];
+            const refs = parseInt(this.getAttribute('data-refs'));
+            const threshold = parseInt(slider.value);
+            
+            return (selectedPhilosophers.has(source) && 
+                    selectedPhilosophers.has(target) && 
+                    refs >= threshold) ? 'block' : 'none';
+        });
+ }
+ 
+ // Modify the slider event listener
  slider.addEventListener('input', function() {
     const threshold = parseInt(this.value);
     thresholdDisplay.textContent = threshold;
-    
-    // Update line visibility based on threshold
-    d3.selectAll('.reference-line')
-        .style('display', function() {
-            const refs = parseInt(this.getAttribute('data-refs'));
-            return refs >= threshold ? 'block' : 'none';
-        });
+    updateVisualization();
  });
